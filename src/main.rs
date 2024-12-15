@@ -10,7 +10,7 @@ use tokio::time::Instant;
 mod s3;
 
 const ITERATIONS: usize = 1;
-const N_OBJECTS: usize = 10;
+const N_OBJECTS: usize = 50;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {

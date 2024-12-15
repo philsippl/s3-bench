@@ -5,6 +5,7 @@ use tokio::{io::AsyncReadExt, task};
 
 const CHUNK_SIZE: usize = 1 << 30;
 const PART_SIZE: usize = 50 << 20;
+const MAX_CONCURRENT_REQUESTS: usize = 256;
 
 pub async fn list_objects(
     client: Arc<Client>,
@@ -38,15 +39,15 @@ pub async fn list_objects(
 
     Ok(objects)
 }
-
 pub async fn fetch_to_mem(
     client: Arc<Client>,
     chunks: Vec<String>,
     bucket: String,
     mem_ptr: *mut u8,
 ) -> eyre::Result<()> {
-    let mut handles: Vec<task::JoinHandle<Result<(), eyre::Error>>> =
-        Vec::with_capacity(chunks.len());
+    let mut handles: Vec<task::JoinHandle<Result<(), eyre::Error>>> = Vec::new();
+    let mut active_handles = 0;
+
     for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
         for part_idx in 0..(CHUNK_SIZE / PART_SIZE) {
             let client = client.clone();
@@ -58,6 +59,14 @@ pub async fn fetch_to_mem(
                     PART_SIZE,
                 )
             };
+
+            // Wait if we've hit the concurrency limit
+            if active_handles >= MAX_CONCURRENT_REQUESTS {
+                let handle = handles.remove(0);
+                handle.await??;
+                active_handles -= 1;
+            }
+
             handles.push(task::spawn(async move {
                 let mut result = client
                     .get_object()
@@ -84,9 +93,11 @@ pub async fn fetch_to_mem(
 
                 Ok(())
             }));
+            active_handles += 1;
         }
     }
 
+    // Wait for remaining handles
     for handle in handles {
         handle.await??;
     }
